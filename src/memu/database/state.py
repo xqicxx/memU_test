@@ -11,6 +11,7 @@ class DatabaseState:
     items: dict[str, MemoryItem] = field(default_factory=dict)
     categories: dict[str, MemoryCategory] = field(default_factory=dict)
     relations: list[CategoryItem] = field(default_factory=list)
+    meta: dict[str, dict[str, object]] = field(default_factory=dict)
 
 
 __all__ = ["DatabaseState"]

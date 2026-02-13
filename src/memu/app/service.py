@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, TypeVar
+from datetime import datetime, timezone
 
 from pydantic import BaseModel
 
@@ -19,6 +22,10 @@ from memu.app.settings import (
     MemorizeConfig,
     RetrieveConfig,
     UserConfig,
+    load_enable_video_from_config,
+    load_memory_categories_from_config,
+    resolve_restart_marker_path,
+    resolve_memory_category_config_path,
 )
 from memu.blob.local_fs import LocalFS
 from memu.database.factory import build_database
@@ -36,6 +43,8 @@ from memu.workflow.runner import WorkflowRunner, resolve_workflow_runner
 from memu.workflow.step import WorkflowState, WorkflowStep
 
 TConfigModel = TypeVar("TConfigModel", bound=BaseModel)
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -64,8 +73,26 @@ class MemoryService(MemorizeMixin, RetrieveMixin, CRUDMixin):
         self.llm_config = self._validate_config(self.llm_profiles.default, LLMConfig)
         self.blob_config = self._validate_config(blob_config, BlobConfig)
         self.database_config = self._validate_config(database_config, DatabaseConfig)
+        memo_categories = load_memory_categories_from_config()
+        enable_video = load_enable_video_from_config()
+        memorize_config = self._merge_memory_categories_config(memorize_config, memo_categories)
+        memorize_config = self._merge_multimodal_config(memorize_config, enable_video)
         self.memorize_config = self._validate_config(memorize_config, MemorizeConfig)
         self.retrieve_config = self._validate_config(retrieve_config, RetrieveConfig)
+        self._warn_missing_llm_api_keys()
+        if memo_categories is not None:
+            logger.info(
+                "Loaded %d memory categories from %s",
+                len(memo_categories),
+                resolve_memory_category_config_path(),
+            )
+        else:
+            logger.info(
+                "Using default memory categories: %d",
+                len(self.memorize_config.memory_categories or []),
+            )
+        if enable_video is not None:
+            logger.info("Video modality enabled: %s", enable_video)
 
         self.fs = LocalFS(self.blob_config.resources_dir)
         self.category_configs: list[CategoryConfig] = list(self.memorize_config.memory_categories or [])
@@ -93,6 +120,94 @@ class MemoryService(MemorizeMixin, RetrieveMixin, CRUDMixin):
             llm_profiles=set(self.llm_profiles.profiles.keys()),
         )
         self._register_pipelines()
+
+    @staticmethod
+    def _merge_memory_categories_config(
+        memorize_config: MemorizeConfig | dict[str, Any] | None,
+        categories: list[CategoryConfig] | None,
+    ) -> MemorizeConfig | dict[str, Any] | None:
+        if not categories:
+            return memorize_config
+        if memorize_config is None:
+            return {"memory_categories": categories}
+        if isinstance(memorize_config, MemorizeConfig):
+            # Explicit config passed; do not override for backward compatibility.
+            return memorize_config
+        if isinstance(memorize_config, Mapping):
+            if "memory_categories" in memorize_config:
+                return memorize_config
+            merged = dict(memorize_config)
+            merged["memory_categories"] = categories
+            return merged
+        return memorize_config
+
+    @staticmethod
+    def _merge_multimodal_config(
+        memorize_config: MemorizeConfig | dict[str, Any] | None,
+        enable_video: bool | None,
+    ) -> MemorizeConfig | dict[str, Any] | None:
+        if enable_video is None:
+            return memorize_config
+        if memorize_config is None:
+            return {"multimodal": {"enable_video": enable_video}}
+        if isinstance(memorize_config, MemorizeConfig):
+            # Explicit config passed; do not override for backward compatibility.
+            return memorize_config
+        if isinstance(memorize_config, Mapping):
+            existing = memorize_config.get("multimodal")
+            if isinstance(existing, Mapping) and "enable_video" in existing:
+                return memorize_config
+            merged = dict(memorize_config)
+            multimodal = dict(existing) if isinstance(existing, Mapping) else {}
+            multimodal.setdefault("enable_video", enable_video)
+            merged["multimodal"] = multimodal
+            return merged
+        return memorize_config
+
+    @staticmethod
+    def _is_missing_api_key(api_key: str | None) -> bool:
+        if api_key is None:
+            return True
+        key = api_key.strip()
+        if not key:
+            return True
+        return key in {
+            "OPENAI_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "SILICONFLOW_API_KEY",
+            "XAI_API_KEY",
+        }
+
+    @staticmethod
+    def _infer_api_key_env(cfg: LLMConfig) -> str | None:
+        key = (cfg.api_key or "").strip()
+        if key in {"DEEPSEEK_API_KEY", "SILICONFLOW_API_KEY", "OPENAI_API_KEY", "XAI_API_KEY"}:
+            return key
+        base_url = (cfg.base_url or "").lower()
+        if "deepseek" in base_url:
+            return "DEEPSEEK_API_KEY"
+        if "siliconflow" in base_url:
+            return "SILICONFLOW_API_KEY"
+        if "x.ai" in base_url or "xai" in base_url:
+            return "XAI_API_KEY"
+        if "openai" in base_url:
+            return "OPENAI_API_KEY"
+        return None
+
+    def _warn_missing_llm_api_keys(self) -> None:
+        for name, cfg in self.llm_profiles.profiles.items():
+            if not self._is_missing_api_key(cfg.api_key):
+                continue
+            env_hint = self._infer_api_key_env(cfg)
+            if env_hint is None:
+                continue
+            logger.warning(
+                "LLM profile '%s' missing API key (provider=%s, base_url=%s). Set %s or pass api_key in llm_profiles.",
+                name,
+                cfg.provider,
+                cfg.base_url,
+                env_hint,
+            )
 
     def _init_llm_client(self, config: LLMConfig | None = None) -> Any:
         """Initialize LLM client based on configuration."""
@@ -299,6 +414,129 @@ class MemoryService(MemorizeMixin, RetrieveMixin, CRUDMixin):
 
     def _get_database(self) -> Database:
         return self.database
+
+    async def health(
+        self,
+        *,
+        user: dict[str, Any] | None = None,
+        include_counts: bool = False,
+    ) -> dict[str, Any]:
+        """
+        Lightweight health/status check for service readiness.
+
+        Does not trigger category initialization or any LLM calls.
+        """
+        restart_status = self._read_restart_marker()
+        status: dict[str, Any] = {
+            "ok": True,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "db": {
+                "provider": self.database_config.metadata_store.provider,
+                "ok": True,
+            },
+            "categories": {
+                "configured": len(self.category_configs),
+                "initialized": self._context.categories_ready,
+                "init_in_progress": self._context.category_init_task is not None,
+            },
+            "restart_required": restart_status.get("restart_required", False),
+        }
+        if "reason" in restart_status:
+            status["restart_reason"] = restart_status["reason"]
+        if "requested_at" in restart_status:
+            status["restart_requested_at"] = restart_status["requested_at"]
+
+        try:
+            store = self._get_database()
+            where_filters: dict[str, Any] | None = None
+            if user:
+                where_filters = self._normalize_where(user)
+            categories = store.memory_category_repo.list_categories(where_filters)
+            if include_counts:
+                items = store.memory_item_repo.list_items(where_filters)
+                status["counts"] = {"categories": len(categories), "items": len(items)}
+        except Exception as exc:
+            status["ok"] = False
+            status["db"]["ok"] = False
+            status["error"] = str(exc)
+
+        return status
+
+    def mark_restart_required(self, *, reason: str | None = None) -> dict[str, Any]:
+        payload = {
+            "restart_required": True,
+            "reason": reason or "config_updated",
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self._write_restart_marker(payload)
+        return payload
+
+    def is_restart_required(self) -> bool:
+        return bool(self._read_restart_marker().get("restart_required", False))
+
+    def clear_restart_required(self) -> bool:
+        payload = {
+            "restart_required": False,
+            "reason": "cleared",
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return self._write_restart_marker(payload)
+
+    def _read_restart_marker(self) -> dict[str, Any]:
+        meta_repo = getattr(self._get_database(), "meta_repo", None)
+        if meta_repo is not None:
+            try:
+                data = meta_repo.get_meta("restart_required")
+                if isinstance(data, dict):
+                    return data
+            except Exception as exc:
+                logger.warning("Failed to read restart marker from DB: %s", exc)
+
+        file_data = self._read_restart_marker_file()
+        if file_data is not None:
+            if meta_repo is not None:
+                try:
+                    meta_repo.set_meta("restart_required", file_data)
+                except Exception as exc:
+                    logger.warning("Failed to sync restart marker into DB: %s", exc)
+            return file_data
+        return {"restart_required": False}
+
+    def _read_restart_marker_file(self) -> dict[str, Any] | None:
+        path = resolve_restart_marker_path()
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+            return {"restart_required": True}
+        except Exception as exc:
+            logger.warning("Failed to read restart marker at %s: %s", path, exc)
+            return {"restart_required": True}
+
+    def _write_restart_marker(self, payload: dict[str, Any]) -> bool:
+        wrote_db = False
+        meta_repo = getattr(self._get_database(), "meta_repo", None)
+        if meta_repo is not None:
+            try:
+                meta_repo.set_meta("restart_required", payload)
+                wrote_db = True
+            except Exception as exc:
+                logger.warning("Failed to write restart marker to DB: %s", exc)
+
+        wrote_file = self._write_restart_marker_file(payload)
+        return wrote_db or wrote_file
+
+    def _write_restart_marker_file(self, payload: dict[str, Any]) -> bool:
+        path = resolve_restart_marker_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            return True
+        except Exception as exc:
+            logger.warning("Failed to write restart marker at %s: %s", path, exc)
+            return False
 
     def _provider_summary(self) -> dict[str, Any]:
         vector_provider = None

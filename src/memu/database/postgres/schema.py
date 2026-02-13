@@ -25,6 +25,7 @@ except ImportError as exc:
 
 from memu.database.postgres.models import (
     CategoryItemModel,
+    MetaModel,
     MemoryCategoryModel,
     MemoryItemModel,
     ResourceModel,
@@ -39,6 +40,7 @@ class SQLAModels:
     MemoryCategory: type[Any]
     MemoryItem: type[Any]
     CategoryItem: type[Any]
+    Meta: type[Any]
 
 
 _MODEL_CACHE: dict[type[Any], SQLAModels] = {}
@@ -85,6 +87,12 @@ def get_sqlalchemy_models(*, scope_model: type[BaseModel] | None = None) -> SQLA
         tablename="category_items",
         metadata=metadata_obj,
     )
+    meta_model = build_table_model(
+        BaseModel,
+        MetaModel,
+        tablename="meta",
+        metadata=metadata_obj,
+    )
 
     class Base(SQLModel):
         __abstract__ = True
@@ -96,6 +104,7 @@ def get_sqlalchemy_models(*, scope_model: type[BaseModel] | None = None) -> SQLA
         MemoryCategory=memory_category_model,
         MemoryItem=memory_item_model,
         CategoryItem=category_item_model,
+        Meta=meta_model,
     )
     _MODEL_CACHE[cache_key] = models
     return models

@@ -74,6 +74,15 @@ class CategoryItemModel(BaseModelMixin, CategoryItem):
     __table_args__ = (Index("idx_category_items_unique", "item_id", "category_id", unique=True),)
 
 
+class MetaModel(SQLModel):
+    key: str = Field(primary_key=True, sa_type=String)
+    value_json: str = Field(sa_column=Column(Text, nullable=False))
+    updated_at: datetime = Field(
+        default_factory=lambda: pendulum.now("UTC"),
+        sa_type=TZDateTime,
+    )
+
+
 def _normalize_table_args(table_args: Any) -> tuple[list[Any], dict[str, Any]]:
     if table_args is None:
         return [], {}
@@ -172,6 +181,7 @@ def build_scoped_models(
 __all__ = [
     "BaseModelMixin",
     "CategoryItemModel",
+    "MetaModel",
     "MemoryCategoryModel",
     "MemoryItemModel",
     "ResourceModel",

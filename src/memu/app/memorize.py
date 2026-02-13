@@ -69,6 +69,16 @@ class MemorizeMixin:
         modality: str,
         user: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        if modality == "video" and not self.memorize_config.multimodal.enable_video:
+            logger.info("Video modality disabled; skipping memorize for %s", resource_url)
+            return {
+                "resources": [],
+                "items": [],
+                "categories": [],
+                "relations": [],
+                "skipped": True,
+                "reason": "video_disabled",
+            }
         ctx = self._get_context()
         store = self._get_database()
         user_scope = self.user_model(**user).model_dump() if user is not None else None
@@ -663,6 +673,17 @@ class MemorizeMixin:
             cat = store.memory_category_repo.get_or_create_category(
                 name=name, description=description, embedding=vec, user_data=dict(user or {})
             )
+            # If category already exists, update description/embedding when config changes.
+            if (cat.description or "") != description or cat.embedding is None:
+                try:
+                    cat = store.memory_category_repo.update_category(
+                        category_id=cat.id,
+                        description=description,
+                        embedding=vec,
+                    )
+                except Exception as exc:
+                    # Best-effort: keep existing category to avoid breaking pipeline.
+                    logger.warning("Failed to update category %s: %s", cat.id, exc)
             ctx.category_ids.append(cat.id)
             ctx.category_name_to_id[name.lower()] = cat.id
         ctx.categories_ready = True

@@ -10,6 +10,7 @@ from memu.database.inmemory.repositories import (
     InMemoryMemoryCategoryRepository,
     InMemoryMemoryItemRepository,
     InMemoryResourceRepository,
+    InMemoryMetaRepository,
 )
 from memu.database.inmemory.state import InMemoryState
 from memu.database.interfaces import Database
@@ -41,6 +42,7 @@ class InMemoryStore(Database):
         self.items: dict[str, MemoryItem] = self.state.items
         self.categories: dict[str, MemoryCategory] = self.state.categories
         self.relations: list[CategoryItem] = self.state.relations
+        self.meta: dict[str, dict[str, object]] = self.state.meta
 
         resource_model = resource_model or default_resource_model or Resource
         memory_item_model = memory_item_model or default_memory_item_model or MemoryItem
@@ -55,6 +57,7 @@ class InMemoryStore(Database):
         self.category_item_repo = InMemoryCategoryItemRepository(
             state=self.state, category_item_model=category_item_model
         )
+        self.meta_repo = InMemoryMetaRepository(state=self.state)
 
     def close(self) -> None:
         return None

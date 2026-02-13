@@ -6,7 +6,7 @@ import json
 import logging
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, ClassVar
 
 import pendulum
 from pydantic import BaseModel
@@ -48,6 +48,8 @@ class SQLiteBaseModelMixin(SQLModel):
 class SQLiteResourceModel(SQLiteBaseModelMixin, Resource):
     """SQLite resource model."""
 
+    # Prevent SQLModel from treating base `embedding` as a column.
+    embedding: ClassVar[list[float] | None]
     url: str = Field(sa_column=Column(String, nullable=False))
     modality: str = Field(sa_column=Column(String, nullable=False))
     local_path: str = Field(sa_column=Column(String, nullable=False))
@@ -78,6 +80,8 @@ class SQLiteResourceModel(SQLiteBaseModelMixin, Resource):
 class SQLiteMemoryItemModel(SQLiteBaseModelMixin, MemoryItem):
     """SQLite memory item model."""
 
+    # Prevent SQLModel from treating base `embedding` as a column.
+    embedding: ClassVar[list[float] | None]
     resource_id: str | None = Field(sa_column=Column(String, nullable=True))
     memory_type: MemoryType = Field(sa_column=Column(String, nullable=False))
     summary: str = Field(sa_column=Column(Text, nullable=False))
@@ -109,6 +113,8 @@ class SQLiteMemoryItemModel(SQLiteBaseModelMixin, MemoryItem):
 class SQLiteMemoryCategoryModel(SQLiteBaseModelMixin, MemoryCategory):
     """SQLite memory category model."""
 
+    # Prevent SQLModel from treating base `embedding` as a column.
+    embedding: ClassVar[list[float] | None]
     name: str = Field(sa_column=Column(String, nullable=False, index=True))
     description: str = Field(sa_column=Column(Text, nullable=False))
     # Store embedding as JSON string since SQLite doesn't have native vector type
@@ -144,6 +150,17 @@ class SQLiteCategoryItemModel(SQLiteBaseModelMixin, CategoryItem):
     __table_args__ = (Index("idx_sqlite_category_items_unique", "item_id", "category_id", unique=True),)
 
 
+class SQLiteMetaModel(SQLModel):
+    """SQLite meta key/value model."""
+
+    key: str = Field(primary_key=True, sa_type=String)
+    value_json: str = Field(sa_column=Column(Text, nullable=False))
+    updated_at: datetime = Field(
+        default_factory=lambda: pendulum.now("UTC"),
+        sa_type=TZDateTime,
+    )
+
+
 def _normalize_table_args(table_args: Any) -> tuple[list[Any], dict[str, Any]]:
     """Normalize SQLAlchemy table args to a consistent format."""
     if table_args is None:
@@ -175,7 +192,11 @@ def _merge_models(
 
     return type(
         f"{user_model.__name__}{core_model.__name__}{name_suffix}",
-        (user_model, core_model),
+        # Put the SQLModel base first. Some SQLModel/Pydantic combinations may
+        # mis-handle inherited fields (e.g. `embedding: list[float] | None`) when
+        # a plain Pydantic BaseModel appears before SQLModel in the MRO, causing
+        # SQLModel to attempt column-mapping for list types.
+        (core_model, user_model),
         base_attrs,
     )
 
@@ -218,7 +239,13 @@ def build_sqlite_table_model(
     base = _merge_models(user_model, core_model, name_suffix="SQLiteBase", base_attrs=base_attrs)
 
     # Use type() instead of create_model to properly preserve SQLModel table behavior
-    table_attrs: dict[str, Any] = {"__module__": core_model.__module__}
+    table_attrs: dict[str, Any] = {
+        "__module__": core_model.__module__,
+        # Ensure inherited embedding fields (list[float]) never become SQL columns.
+        # Older SQLModel versions will try to map list types and raise:
+        #   ValueError: <class 'list'> has no matching SQLAlchemy type
+        "__annotations__": {"embedding": ClassVar[list[float] | None]},
+    }
     return type(
         f"{user_model.__name__}{core_model.__name__}SQLiteTable",
         (base,),
@@ -230,6 +257,7 @@ def build_sqlite_table_model(
 __all__ = [
     "SQLiteBaseModelMixin",
     "SQLiteCategoryItemModel",
+    "SQLiteMetaModel",
     "SQLiteMemoryCategoryModel",
     "SQLiteMemoryItemModel",
     "SQLiteResourceModel",

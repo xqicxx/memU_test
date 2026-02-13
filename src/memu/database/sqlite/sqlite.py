@@ -7,11 +7,13 @@ from typing import Any
 
 from pydantic import BaseModel
 from sqlmodel import SQLModel
+from sqlalchemy import inspect
 
 from memu.database.interfaces import Database
 from memu.database.models import CategoryItem, MemoryCategory, MemoryItem, Resource
-from memu.database.repositories import CategoryItemRepo, MemoryCategoryRepo, MemoryItemRepo, ResourceRepo
+from memu.database.repositories import CategoryItemRepo, MemoryCategoryRepo, MemoryItemRepo, ResourceRepo, MetaRepo
 from memu.database.sqlite.repositories.category_item_repo import SQLiteCategoryItemRepo
+from memu.database.sqlite.repositories.meta_repo import SQLiteMetaRepo
 from memu.database.sqlite.repositories.memory_category_repo import SQLiteMemoryCategoryRepo
 from memu.database.sqlite.repositories.memory_item_repo import SQLiteMemoryItemRepo
 from memu.database.sqlite.repositories.resource_repo import SQLiteResourceRepo
@@ -44,10 +46,12 @@ class SQLiteStore(Database):
     memory_category_repo: MemoryCategoryRepo
     memory_item_repo: MemoryItemRepo
     category_item_repo: CategoryItemRepo
+    meta_repo: MetaRepo
     resources: dict[str, Resource]
     items: dict[str, MemoryItem]
     categories: dict[str, MemoryCategory]
     relations: list[CategoryItem]
+    meta: dict[str, dict[str, object]]
 
     def __init__(
         self,
@@ -76,7 +80,11 @@ class SQLiteStore(Database):
         self._scope_fields = list(getattr(self._scope_model, "model_fields", {}).keys())
         self._state = DatabaseState()
         self._sessions = SQLiteSessionManager(dsn=self.dsn)
-        self._sqla_models: SQLiteSQLAModels = sqla_models or get_sqlite_sqlalchemy_models(scope_model=self._scope_model)
+        table_prefix = self._resolve_table_prefix()
+        self._sqla_models: SQLiteSQLAModels = sqla_models or get_sqlite_sqlalchemy_models(
+            scope_model=self._scope_model,
+            table_prefix=table_prefix,
+        )
 
         # Create tables
         self._create_tables()
@@ -86,6 +94,7 @@ class SQLiteStore(Database):
         memory_category_model = memory_category_model or self._sqla_models.MemoryCategory
         memory_item_model = memory_item_model or self._sqla_models.MemoryItem
         category_item_model = category_item_model or self._sqla_models.CategoryItem
+        meta_model = self._sqla_models.Meta
 
         # Initialize repositories
         self.resource_repo = SQLiteResourceRepo(
@@ -116,12 +125,20 @@ class SQLiteStore(Database):
             sessions=self._sessions,
             scope_fields=self._scope_fields,
         )
+        self.meta_repo = SQLiteMetaRepo(
+            state=self._state,
+            meta_model=meta_model,
+            sqla_models=self._sqla_models,
+            sessions=self._sessions,
+            scope_fields=self._scope_fields,
+        )
 
         # Set up cache references
         self.resources = self._state.resources
         self.items = self._state.items
         self.categories = self._state.categories
         self.relations = self._state.relations
+        self.meta = self._state.meta
 
     def _create_tables(self) -> None:
         """Create SQLite tables if they don't exist."""
@@ -129,6 +146,24 @@ class SQLiteStore(Database):
         # Also create tables from our custom metadata
         self._sqla_models.Base.metadata.create_all(self._sessions.engine)
         logger.debug("SQLite tables created/verified")
+
+    def _resolve_table_prefix(self) -> str:
+        """
+        Choose SQLite table prefix.
+
+        Use legacy "sqlite_" prefix if existing tables are found; otherwise use "memu_"
+        to avoid reserved sqlite_ table name restriction.
+        """
+        try:
+            names = set(inspect(self._sessions.engine).get_table_names())
+        except Exception as exc:
+            logger.warning("Failed to inspect sqlite tables: %s", exc)
+            return "memu_"
+        if any(name.startswith("sqlite_") for name in names):
+            return "sqlite_"
+        if any(name.startswith("memu_") for name in names):
+            return "memu_"
+        return "memu_"
 
     def close(self) -> None:
         """Close the database connection and release resources."""

@@ -9,12 +9,13 @@ from memu.database.interfaces import Database
 from memu.database.models import CategoryItem, MemoryCategory, MemoryItem, Resource
 from memu.database.postgres.migration import DDLMode, run_migrations
 from memu.database.postgres.repositories.category_item_repo import PostgresCategoryItemRepo
+from memu.database.postgres.repositories.meta_repo import PostgresMetaRepo
 from memu.database.postgres.repositories.memory_category_repo import PostgresMemoryCategoryRepo
 from memu.database.postgres.repositories.memory_item_repo import PostgresMemoryItemRepo
 from memu.database.postgres.repositories.resource_repo import PostgresResourceRepo
 from memu.database.postgres.schema import SQLAModels, get_sqlalchemy_models, require_sqlalchemy
 from memu.database.postgres.session import SessionManager
-from memu.database.repositories import CategoryItemRepo, MemoryCategoryRepo, MemoryItemRepo, ResourceRepo
+from memu.database.repositories import CategoryItemRepo, MemoryCategoryRepo, MemoryItemRepo, ResourceRepo, MetaRepo
 from memu.database.state import DatabaseState
 
 logger = logging.getLogger(__name__)
@@ -25,10 +26,12 @@ class PostgresStore(Database):
     memory_category_repo: MemoryCategoryRepo
     memory_item_repo: MemoryItemRepo
     category_item_repo: CategoryItemRepo
+    meta_repo: MetaRepo
     resources: dict[str, Resource]
     items: dict[str, MemoryItem]
     categories: dict[str, MemoryCategory]
     relations: list[CategoryItem]
+    meta: dict[str, dict[str, object]]
 
     def __init__(
         self,
@@ -60,6 +63,7 @@ class PostgresStore(Database):
         memory_category_model = memory_category_model or self._sqla_models.MemoryCategory
         memory_item_model = memory_item_model or self._sqla_models.MemoryItem
         category_item_model = category_item_model or self._sqla_models.CategoryItem
+        meta_model = self._sqla_models.Meta
 
         self.resource_repo = PostgresResourceRepo(
             state=self._state,
@@ -90,11 +94,19 @@ class PostgresStore(Database):
             sessions=self._sessions,
             scope_fields=self._scope_fields,
         )
+        self.meta_repo = PostgresMetaRepo(
+            state=self._state,
+            meta_model=meta_model,
+            sqla_models=self._sqla_models,
+            sessions=self._sessions,
+            scope_fields=self._scope_fields,
+        )
 
         self.resources = self._state.resources
         self.items = self._state.items
         self.categories = self._state.categories
         self.relations = self._state.relations
+        self.meta = self._state.meta
 
         # self._load_existing()
 

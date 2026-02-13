@@ -8,6 +8,11 @@ from memu.app.settings import (
     MemorizeConfig,
     RetrieveConfig,
     UserConfig,
+    load_enable_video_from_config,
+    load_memory_categories_from_config,
+    resolve_restart_marker_path,
+    resolve_memu_config_path,
+    resolve_memory_category_config_path,
 )
 from memu.workflow.runner import (
     LocalWorkflowRunner,
@@ -30,4 +35,9 @@ __all__ = [
     "WorkflowRunner",
     "register_workflow_runner",
     "resolve_workflow_runner",
+    "load_memory_categories_from_config",
+    "load_enable_video_from_config",
+    "resolve_memu_config_path",
+    "resolve_restart_marker_path",
+    "resolve_memory_category_config_path",
 ]

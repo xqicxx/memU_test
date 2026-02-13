@@ -2,6 +2,7 @@ from memu.database.inmemory.repositories.category_item_repo import (
     CategoryItemRepo,
     InMemoryCategoryItemRepository,
 )
+from memu.database.inmemory.repositories.meta_repo import InMemoryMetaRepository
 from memu.database.inmemory.repositories.memory_category_repo import (
     InMemoryMemoryCategoryRepository,
     MemoryCategoryRepo,
@@ -12,6 +13,7 @@ from memu.database.inmemory.repositories.resource_repo import InMemoryResourceRe
 __all__ = [
     "CategoryItemRepo",
     "InMemoryCategoryItemRepository",
+    "InMemoryMetaRepository",
     "InMemoryMemoryCategoryRepository",
     "InMemoryMemoryItemRepository",
     "InMemoryResourceRepository",
