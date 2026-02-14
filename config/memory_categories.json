@@ -1,0 +1,7 @@
+{
+  "memory_categories": [
+    {"name": "personal_info", "description": "用户个人信息"},
+    {"name": "preferences", "description": "用户偏好"},
+    {"name": "work", "description": "职业/工作信息"}
+  ]
+}
