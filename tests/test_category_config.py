@@ -35,7 +35,7 @@ def test_fallback_to_default_categories(monkeypatch) -> None:
         database_config={"metadata_store": {"provider": "inmemory"}},
     )
     names = [c.name for c in service.category_configs]
-    assert "personal_info" in names
+    assert "about_me" in names
 
 
 def test_standard_memory_categories() -> None:
