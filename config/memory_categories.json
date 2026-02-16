@@ -1,7 +1,44 @@
 {
   "memory_categories": [
-    {"name": "personal_info", "description": "用户个人信息"},
-    {"name": "preferences", "description": "用户偏好"},
-    {"name": "work", "description": "职业/工作信息"}
+    {
+      "name": "about_me",
+      "description": "Basic personal information and stable facts about the user"
+    },
+    {
+      "name": "preferences",
+      "description": "Likes, dislikes and personal preferences"
+    },
+    {
+      "name": "relationships",
+      "description": "Information about important people and social connections"
+    },
+    {
+      "name": "work_study",
+      "description": "Work, study, projects and learning-related information"
+    },
+    {
+      "name": "goals",
+      "description": "Short-term and long-term goals"
+    },
+    {
+      "name": "habits",
+      "description": "Repeated behaviors and routines"
+    },
+    {
+      "name": "fitness",
+      "description": "Workout records, training, exercise plans and physical data"
+    },
+    {
+      "name": "experiences",
+      "description": "Notable past events or important experiences"
+    },
+    {
+      "name": "temporary_state",
+      "description": "Short-term moods or current situations (low retention)"
+    },
+    {
+      "name": "system_meta",
+      "description": "Internal system metadata and runtime flags"
+    }
   ]
 }
