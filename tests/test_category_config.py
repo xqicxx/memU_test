@@ -36,3 +36,41 @@ def test_fallback_to_default_categories(monkeypatch) -> None:
     )
     names = [c.name for c in service.category_configs]
     assert "personal_info" in names
+
+
+def test_standard_memory_categories() -> None:
+    """Test that standard 10 memory categories are properly configured."""
+    config_path = Path(__file__).parent.parent / "config" / "memory_categories.json"
+
+    # Load and parse JSON
+    with open(config_path, encoding="utf-8") as f:
+        data = json.load(f)
+
+    assert "memory_categories" in data
+    categories = data["memory_categories"]
+    assert isinstance(categories, list)
+    assert len(categories) == 10
+
+    # Expected standard categories
+    expected_names = [
+        "about_me",
+        "preferences",
+        "relationships",
+        "work_study",
+        "goals",
+        "habits",
+        "fitness",
+        "experiences",
+        "temporary_state",
+        "system_meta",
+    ]
+
+    actual_names = [cat["name"] for cat in categories]
+    assert actual_names == expected_names
+
+    # Verify all categories have name and description
+    for cat in categories:
+        assert "name" in cat
+        assert "description" in cat
+        assert cat["name"]
+        assert cat["description"]
